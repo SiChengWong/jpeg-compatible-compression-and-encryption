@@ -1,3 +1,5 @@
+import base64
+
 class RC4:
     """
     RC4 encryption and decryption algorithm
@@ -33,14 +35,16 @@ class RC4:
             j = (j + self.S[i] + self.T[i]) % 256
             self.swap(self.S, i, j)
 
-    def encrypt(self, M: list):
+    def encrypt(self, M: list, continue_flag = False):
         """
         encrypt message M with RC4 algorithm
+        :param continue_flag: if continue the encryption without re-initializing the S-box
         :type M: list of byte
         :param M: plain text
         :return: cipher text
         """
-        self.initialize(self.K)
+        if continue_flag == False:
+            self.initialize(self.K)
         i = j = 0
         C = []
         for m in M:
@@ -51,14 +55,16 @@ class RC4:
             C.append(m ^ self.S[t])
         return C
 
-    def decrypt(self, C: list):
+    def decrypt(self, C: list, continue_flag = False):
         """
         encrypt message M with RC4 algorithm
+        :param continue_flag: if continue the encryption without re-initializing the S-box
         :type C: list of byte
         :param C: cipher text
         :return: plain text
         """
-        self.initialize(self.K)
+        if continue_flag == False:
+            self.initialize(self.K)
         i = j = 0
         M = []
         for c in C:
@@ -77,11 +83,12 @@ def main():
 
     # encrypt message and display
     C = rc4.encrypt([ord(m) for m in M])
-    print("".join([chr(c) for c in C]))
+    cipher_text = base64.encodebytes(bytes(C))
+    print(cipher_text)
 
     # decrypt cipher text and display
     M_ = rc4.decrypt(C)
-    print("".join([chr(m_) for  m_ in M_]))
+    print("".join([chr(m_) for m_ in M_]))
 
 if __name__ == '__main__':
     main()
