@@ -12,6 +12,7 @@ class RC4:
         :param K: secrete key
         """
         self.K = K
+        self.initialize(self.K)
 
     def swap(self, array: list, i: int, j: int):
         """
