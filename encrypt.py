@@ -1,4 +1,5 @@
 from struct import unpack
+from struct import pack
 from rc4 import RC4
 
 
@@ -8,10 +9,23 @@ def remove0xFF00(l: list[int]) -> list[int]:
     :param l: list to be removed 0xFF00
     :return: list after removing 0xFF00
     """
+    l_without_0xFF00 = [l[0]]
     for i in range(1, len(l)):
-        if l[i - 1] == 0xFF and l[i] == 0x00:
-            l.pop(i)
-        return l
+        if l[i] == 0x00:
+            if l[i - 1] != 0xFF:
+                l_without_0xFF00.append(l[i])
+        else:
+            l_without_0xFF00.append(l[i])
+    return l_without_0xFF00
+
+
+def add0xFF00(l: list[int]) -> list[int]:
+    l_added_0xFF00 = []
+    for i in range(len(l)):
+        l_added_0xFF00.append(l[i])
+        if l[i] == 0xFF:
+            l_added_0xFF00.append(0x00)
+    return l_added_0xFF00
 
 
 def GetArray(elem_type, l, length):
@@ -57,7 +71,7 @@ def bitListToByteList(bit_list: list[int]) -> list[int]:
         bit_list.append(0)
     byte_list = []
     for i in range(len(bit_list) // 8):
-        byte_list.append(bitListToInt(bit_list[i*8: i*8 + 8]))
+        byte_list.append(bitListToInt(bit_list[i * 8: i * 8 + 8]))
     return byte_list
 
 
@@ -144,6 +158,12 @@ class Stream:
     def len(self):
         return len(self.data)
 
+    def modifyBit(self, pos: int, bit: int) -> None:
+        byte = self.data[pos >> 3]
+        bit_list = paddingToLen(intToBitList(byte), 8)
+        bit_list[pos & 7] = bit
+        self.data[pos >> 3] = bitListToInt(bit_list)
+
 
 class Decoder:
     def __init__(self, image: str):
@@ -154,9 +174,12 @@ class Decoder:
         # open an image file, read data from it
         with open(image, 'rb') as f:
             self.data = list(f.read())
+
+        # initialize variables
         self.huffman_tables: dict[int, HuffmanTable] = {}
         self.height = 0
         self.width = 0
+        self.segments = {}
 
     def separateSegment(self, data: list[int]) -> dict[int, list[int]]:
         """
@@ -207,7 +230,7 @@ class Decoder:
             print("Error: invalid DHT segment")
             return
         length = byteListToInt(segment[2: 4])
-        data = segment[2: length + 2]
+        data = segment[4: length + 2]
         while len(data) > 0:
             # get information of Huffman table
             offset = 0
@@ -248,6 +271,7 @@ class Decoder:
         	                    It contains, (component Id(1byte)(1 = Y, 2 = Cb, 3 = Cr, 4 = I, 5 = Q),
         	                    sampling factors (1byte) (bit 0-3 vertical., 4-7 horizontal.),
         	                    quantization table number (1 byte)).
+        -------------------------------------------------------------------
         :param segment: SOF segment
         :return:
         """
@@ -272,7 +296,7 @@ class Decoder:
                 self.getImageSize(self.segments[marker])
 
 
-def sortListAtElemLen(list_of_list: list[list[int]]) -> list[int]:
+def sortListOnElemLen(list_of_list: list[list[int]]) -> list[int]:
     """
     sort list of list according to their length in descending order
     :param list_of_list: list to be sorted
@@ -298,6 +322,7 @@ class Crypto:
         :param key: secrete key
         """
         # decode basic information
+        self.image = image
         self.jpeg_image_decoder = Decoder(image)
         self.jpeg_image_decoder.decode()
 
@@ -323,7 +348,6 @@ class Crypto:
         l = 1
         while l < 64:
             symbol1 = self.jpeg_image_decoder.huffman_tables[16 + idx].GetCode(st)
-            pos_list.append(st.pos)
             if symbol1 == 0:
                 # End of Block
                 break
@@ -331,6 +355,7 @@ class Crypto:
             if symbol1 > 15:
                 l += symbol1 >> 4
             size = symbol1 & 0x0F
+            pos_list.append(st.pos)
             amplitude_bits_list.append(paddingToLen(intToBitList(st.GetBitN(size)), size))
             if l < 64:
                 l += 1
@@ -343,13 +368,13 @@ class Crypto:
         :return: encrypted bit list
         """
         # sort AC coefficient bit list
-        sorted_indices = sortListAtElemLen(bits_list[1:])
+        sorted_indices = sortListOnElemLen(bits_list[1:])
         # add in index of DC coefficient
         sorted_indices = [sorted_indices[i] + 1 for i in range(len(sorted_indices))]
         sorted_indices.insert(0, 0)
 
-        # bits list for encryption
-        bit_list_for_encryption: list[int] = bits_list[0]
+        # bit list for encryption
+        bit_list_for_encryption: list[int] = []
         for i in range(len(sorted_indices)):
             bit_list_for_encryption += bits_list[sorted_indices[i]]
 
@@ -376,11 +401,23 @@ class Crypto:
         # write back encrypted amplitude into st.data
         for i in range(len(amplitude_pos_list)):
             for j in range(len(encrypted_amplitude_bits_list[i])):
-                st.data[amplitude_pos_list[i] + j] = encrypted_amplitude_bits_list[i][j]
+                st.modifyBit(amplitude_pos_list[sorted_indices[i]], encrypted_amplitude_bits_list[i][j])
 
-    def encrypt(self, data: list[int]) -> list[int]:
+    def encryptStartOfScan(self, data: list[int]) -> list[int]:
         """
-
+        Start of Scan structure:
+        -------------------------------------------------------------------
+        Marker Identifier	    2 bytes, 0xff, 0xda
+        Length	                2 bytes, 0x0c
+        	                    This value equals to 6 + components*3
+        Components Number       1 byte, 1-4
+        Selector                components*2 bytes, each selector's structure:
+                                ------------------------
+                                selector    DC, AC table
+                                ------------------------
+        Spectral select     	1 byte, 0...63
+        Successive approx.	    1 byte, 00
+        -------------------------------------------------------------------
         :param data: data of Start of Scan segment
         :return:
         """
@@ -389,14 +426,31 @@ class Crypto:
             print("Error: invalid Start of Scan segment")
             return None
 
-        st = Stream(data[2:])
+        components = byteListToInt(data[4: 5])
+        data_start = 8 + components*2
+        st = Stream(data[data_start:])
         for y in range(self.jpeg_image_decoder.height // 8):
             for x in range(self.jpeg_image_decoder.width // 8):
-                self.encryptMatrix(st, 0)   # luminance
-                self.encryptMatrix(st, 1)   # chrominance r
-                self.encryptMatrix(st, 1)   # chrominance b
+                self.encryptMatrix(st, 0)  # luminance
+                self.encryptMatrix(st, 1)  # chrominance r
+                self.encryptMatrix(st, 1)  # chrominance b
 
         # write back encrypted result into data
         for i in range(len(st.data)):
-            data[i + 2] = st.data[i]
+            data[i + data_start] = st.data[i]
         return data
+
+    def encryptImage(self):
+        self.encryptStartOfScan(self.jpeg_image_decoder.segments[0xFFDA])
+
+        # save encrypted image
+        with open("encrypted_" + self.image, "wb") as f:
+            for marker in self.jpeg_image_decoder.segments:
+                self.jpeg_image_decoder.segments[marker] = (
+                    self.jpeg_image_decoder.segments[marker][0: 2] +
+                    add0xFF00(self.jpeg_image_decoder.segments[marker][2:])
+                )
+
+                for elem in self.jpeg_image_decoder.segments[marker]:
+                    byte = pack("B", elem)
+                    f.write(byte)
