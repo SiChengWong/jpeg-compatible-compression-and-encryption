@@ -64,7 +64,7 @@ def RemoveFF00(data):
     datapro = []
     i = 0
     while True:
-        b, bnext = unpack("BB", data[i : i + 2])
+        b, bnext = unpack("BB", data[i: i + 2])
         if b == 0xFF:
             if bnext != 0:
                 break
@@ -141,9 +141,9 @@ class IDCT:
                 for u in range(self.idct_precision):
                     for v in range(self.idct_precision):
                         local_sum += (
-                            self.zigzag[v][u]
-                            * self.idct_table[u][x]
-                            * self.idct_table[v][y]
+                                self.zigzag[v][u]
+                                * self.idct_table[u][x]
+                                * self.idct_table[v][y]
                         )
                 out[y][x] = local_sum // 4
         self.base = out
@@ -219,7 +219,6 @@ class Stream:
     def len(self):
         return len(self.data)
 
-
 class JPEG:
     """
     JPEG class for decoding a baseline encoded JPEG image
@@ -241,20 +240,28 @@ class JPEG:
     def BuildMatrix(self, st, idx, quant, olddccoeff):
         i = IDCT()
 
+        # extract DC coefficient
+        # code: symbol-1, size of amplitude
+        # bits: symbol-2, value of amplitude
         code = self.huffman_tables[0 + idx].GetCode(st)
         bits = st.GetBitN(code)
         dccoeff = DecodeNumber(code, bits) + olddccoeff
 
         i.base[0] = (dccoeff) * quant[0]
+
+        # extract AC coefficient
         l = 1
         while l < 64:
             code = self.huffman_tables[16 + idx].GetCode(st)
+            # EOB, End of Block
             if code == 0:
                 break
 
             # The first part of the AC key_len
             # is the number of leading zeros
             if code > 15:
+                # 4 MSB: zero run-length
+                # 4 LSB: size of amplitude
                 l += code >> 4
                 code = code & 0x0F
 
@@ -292,25 +299,25 @@ class JPEG:
 
     def BaselineDCT(self, data):
         hdr, self.height, self.width, components = unpack(">BHHB", data[0:6])
-        print("size %ix%i" % (self.width,  self.height))
+        print("size %ix%i" % (self.width, self.height))
 
         for i in range(components):
-            id, samp, QtbId = unpack("BBB", data[6 + i * 3 : 9 + i * 3])
+            id, samp, QtbId = unpack("BBB", data[6 + i * 3: 9 + i * 3])
             self.quantMapping.append(QtbId)
 
     def decodeHuffman(self, data):
         while len(data) > 0:
             offset = 0
-            (header,) = unpack("B", data[offset : offset + 1])
+            (header,) = unpack("B", data[offset: offset + 1])
             print(header, header & 0x0F, (header >> 4) & 0x0F)
             offset += 1
 
-            lengths = GetArray("B", data[offset : offset + 16], 16)
+            lengths = GetArray("B", data[offset: offset + 16], 16)
             offset += 16
 
             elements = []
             for i in lengths:
-                elements += GetArray("B", data[offset : offset + i], i)
+                elements += GetArray("B", data[offset: offset + i], i)
                 offset += i
 
             hf = HuffmanTable()
@@ -350,6 +357,6 @@ if __name__ == "__main__":
     master = Tk()
     w = Canvas(master, width=1600, height=800)
     w.pack()
-    img = JPEG("2.jpg")
+    img = JPEG("sample.jpg")
     img.decode()
     mainloop()
