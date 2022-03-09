@@ -315,7 +315,7 @@ def sortListOnElemLen(list_of_list: list[list[int]]) -> list[int]:
 
 
 class Crypto:
-    def __init__(self, image: str, key: list[int]):
+    def __init__(self, image: str, key: list[int], reverse: bool = False):
         """
         set value to initialize
         :param image: file name of image to be encrypted
@@ -328,6 +328,8 @@ class Crypto:
 
         # set key for RC4 encryption & decryption
         self.key = key
+        # working mode, whether execute encryption or decryption
+        self.reverse = reverse
 
     def getAmplitudeBitList(self, st: Stream, idx: int) -> tuple[list[list[int]], list[int]]:
         """
@@ -380,7 +382,10 @@ class Crypto:
 
         # encrypt with RC4
         rc4 = RC4(self.key)
-        encrypted_byte_list = rc4.encrypt(bitListToByteList(bit_list_for_encryption))
+        if self.reverse == False:
+            encrypted_byte_list = rc4.encrypt(bitListToByteList(bit_list_for_encryption))
+        else:
+            encrypted_byte_list = rc4.decrypt(bitListToByteList(bit_list_for_encryption))
         encrypted_bit_list = byteListToBitList(encrypted_byte_list)
         return encrypted_bit_list, sorted_indices
 
@@ -444,7 +449,11 @@ class Crypto:
         self.encryptStartOfScan(self.jpeg_image_decoder.segments[0xFFDA])
 
         # save encrypted image
-        with open("encrypted_" + self.image, "wb") as f:
+        if self.reverse == False:
+            image_output = "encrypted_" + self.image
+        else:
+            image_output = "decrypted_" + self.image
+        with open(image_output, "wb") as f:
             for marker in self.jpeg_image_decoder.segments:
                 self.jpeg_image_decoder.segments[marker] = (
                     self.jpeg_image_decoder.segments[marker][0: 2] +
