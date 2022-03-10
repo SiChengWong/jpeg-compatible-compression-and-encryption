@@ -1,6 +1,6 @@
 from struct import unpack
 from struct import pack
-from rc4 import RC4
+import random
 
 
 def remove0xFF00(l: list[int]) -> list[int]:
@@ -65,7 +65,7 @@ def bitListToInt(bit_list: list[int]) -> int:
         n = (n << 1) + b
     return n
 
-
+'''
 def bitListToByteList(bit_list: list[int]) -> list[int]:
     while len(bit_list) % 8 != 0:
         bit_list.append(0)
@@ -74,13 +74,12 @@ def bitListToByteList(bit_list: list[int]) -> list[int]:
         byte_list.append(bitListToInt(bit_list[i * 8: i * 8 + 8]))
     return byte_list
 
-
 def byteListToBitList(byte_list: list[int]) -> list[int]:
     bit_list = []
     for byte in byte_list:
         bit_list += paddingToLen(intToBitList(byte), 8)
     return bit_list
-
+'''
 
 def paddingToLen(l: list[int], length: int, pos: int = 0):
     while len(l) < length:
@@ -315,7 +314,7 @@ def sortListOnElemLen(list_of_list: list[list[int]]) -> list[int]:
 
 
 class Crypto:
-    def __init__(self, image: str, key: list[int], reverse: bool = False):
+    def __init__(self, image: str, key: int):
         """
         set value to initialize
         :param image: file name of image to be encrypted
@@ -328,8 +327,6 @@ class Crypto:
 
         # set key for RC4 encryption & decryption
         self.key = key
-        # working mode, whether execute encryption or decryption
-        self.reverse = reverse
 
     def getAmplitudeBitList(self, st: Stream, idx: int) -> tuple[list[list[int]], list[int]]:
         """
@@ -380,13 +377,11 @@ class Crypto:
         for i in range(len(sorted_indices)):
             bit_list_for_encryption += bits_list[sorted_indices[i]]
 
-        # encrypt with RC4
-        rc4 = RC4(self.key)
-        if self.reverse == False:
-            encrypted_byte_list = rc4.encrypt(bitListToByteList(bit_list_for_encryption))
-        else:
-            encrypted_byte_list = rc4.decrypt(bitListToByteList(bit_list_for_encryption))
-        encrypted_bit_list = byteListToBitList(encrypted_byte_list)
+        # encrypt with pseudo-random bit stream
+        random.seed(self.key)
+        encrypted_bit_list = []
+        for i in range(len(bit_list_for_encryption)):
+            encrypted_bit_list.append(bit_list_for_encryption[i] ^ random.randint(0, 1))
         return encrypted_bit_list, sorted_indices
 
     def encryptMatrix(self, st: Stream, idx: int):
@@ -394,19 +389,17 @@ class Crypto:
         amplitude_bits_list, amplitude_pos_list = self.getAmplitudeBitList(st, idx)
         # encrypt amplitude bits
         encrypted_bit_list, sorted_indices = self.encryptCoefficientBitList(amplitude_bits_list)
-        encrypted_amplitude_bits_list = []
 
         # divide encrypted bit list according to amplitude length
+        encrypted_amplitude_bits_list = [[] for i in range(len(sorted_indices))]
         for i in range(len(sorted_indices)):
-            encrypted_amplitude_bits = []
             for j in range(len(amplitude_bits_list[sorted_indices[i]])):
-                encrypted_amplitude_bits.append(encrypted_bit_list.pop(0))
-            encrypted_amplitude_bits_list.append(encrypted_amplitude_bits)
+                encrypted_amplitude_bits_list[sorted_indices[i]].append(encrypted_bit_list.pop(0))
 
         # write back encrypted amplitude into st.data
         for i in range(len(amplitude_pos_list)):
             for j in range(len(encrypted_amplitude_bits_list[i])):
-                st.modifyBit(amplitude_pos_list[sorted_indices[i]], encrypted_amplitude_bits_list[i][j])
+                st.modifyBit(amplitude_pos_list[i] + j, encrypted_amplitude_bits_list[i][j])
 
     def encryptStartOfScan(self, data: list[int]) -> list[int]:
         """
@@ -449,10 +442,7 @@ class Crypto:
         self.encryptStartOfScan(self.jpeg_image_decoder.segments[0xFFDA])
 
         # save encrypted image
-        if self.reverse == False:
-            image_output = "encrypted_" + self.image
-        else:
-            image_output = "decrypted_" + self.image
+        image_output = "_" + self.image
         with open(image_output, "wb") as f:
             for marker in self.jpeg_image_decoder.segments:
                 self.jpeg_image_decoder.segments[marker] = (
