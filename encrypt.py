@@ -1,6 +1,6 @@
-from struct import unpack
 from struct import pack
 import random
+import rc4
 
 
 def remove0xFF00(l: list[int]) -> list[int]:
@@ -28,14 +28,17 @@ def add0xFF00(l: list[int]) -> list[int]:
     return l_added_0xFF00
 
 
-def GetArray(elem_type, l, length):
-    """
-    A convenience function for unpacking an array from bitstream
-    """
-    s = ""
-    for i in range(length):
-        s = s + elem_type
-    return list(unpack(s, l[:length]))
+def removeMarker(l: list[int], marker: int) -> list[int]:
+    l_without_marker = []
+    marker_len = len(intToBitList(marker)) >> 3
+    i = 0
+    while i < len(l):
+        if i + marker_len < len(l) and byteListToInt(l[i: i + marker_len]) == marker:
+            i += marker_len
+        else:
+            l_without_marker.append(l[i])
+            i += 1
+    return l_without_marker
 
 
 def byteListToInt(l: list[int]) -> int:
@@ -65,26 +68,29 @@ def bitListToInt(bit_list: list[int]) -> int:
         n = (n << 1) + b
     return n
 
-'''
-def bitListToByteList(bit_list: list[int]) -> list[int]:
-    while len(bit_list) % 8 != 0:
-        bit_list.append(0)
-    byte_list = []
-    for i in range(len(bit_list) // 8):
-        byte_list.append(bitListToInt(bit_list[i * 8: i * 8 + 8]))
-    return byte_list
-
-def byteListToBitList(byte_list: list[int]) -> list[int]:
-    bit_list = []
-    for byte in byte_list:
-        bit_list += paddingToLen(intToBitList(byte), 8)
-    return bit_list
-'''
 
 def paddingToLen(l: list[int], length: int, pos: int = 0):
     while len(l) < length:
         l.insert(pos, 0)
     return l
+
+
+def sortListOnElemLen(list_of_list: list[list[int]]) -> list[int]:
+    """
+    sort list of list according to their length in descending order
+    :param list_of_list: list to be sorted
+    :return: sorted index
+    """
+    len_dict: dict[int, list[int]] = {}
+    for i in range(len(list_of_list)):
+        elem_len = len(list_of_list[i])
+        if elem_len not in len_dict:
+            len_dict[elem_len] = []
+        len_dict[elem_len].append(i)
+    sorted_indices = []
+    for i in sorted(len_dict, reverse=True):
+        sorted_indices += len_dict[i]
+    return sorted_indices
 
 
 class HuffmanTable:
@@ -176,11 +182,19 @@ class Decoder:
 
         # initialize variables
         self.huffman_tables: dict[int, HuffmanTable] = {}
+        self.huffman_table_mapping: dict[int, int] = {}
+
+        self.quantization_tables: dict[int, list[int]] = {}
+        self.quantization_mapping: dict[int, int] = {}
+
+        self.subsample_factor: dict[int, int] = {}
+
         self.height = 0
         self.width = 0
-        self.segments = {}
 
-    def separateSegment(self, data: list[int]) -> dict[int, list[int]]:
+        self.segments: dict[int, list[list[int]]] = {}
+
+    def separateSegment(self, data: list[int]) -> dict[int, list[list[int]]]:
         """
         separate segments according to markers starting with 0xFF
         """
@@ -190,17 +204,17 @@ class Decoder:
             if data[i - 1] == 0xFF and data[i] != 0x00:
                 # find a marker
                 marker_pos.append(i - 1)
+        marker_pos.append(len(data))
         # list of segments
         segments = {}
-        for i in range(1, len(marker_pos)):
-            marker = byteListToInt(data[marker_pos[i - 1]: marker_pos[i - 1] + 2])
-            segments[marker] = remove0xFF00(data[marker_pos[i - 1]: marker_pos[i]])
-        # add the last segment, which starts from the last marker to end
-        marker = byteListToInt(data[marker_pos[-1]: marker_pos[-1] + 2])
-        segments[marker] = remove0xFF00(data[marker_pos[-1]:])
+        for i in range(len(marker_pos) - 1):
+            marker = byteListToInt(data[marker_pos[i]: marker_pos[i] + 2])
+            if marker not in segments:
+                segments[marker] = []
+            segments[marker].append(remove0xFF00(data[marker_pos[i]: marker_pos[i + 1]]))
         return segments
 
-    def decodeHuffman(self, segment: list[int]) -> None:
+    def decodeHuffman(self, segment: list[list[int]]) -> None:
         """
         segment DHT(Define of Huffman Table) structure:
         -------------------------------------------------------------------
@@ -224,34 +238,49 @@ class Decoder:
         :param segment: DHT segment
         :return:
         """
-        marker = byteListToInt(segment[0: 2])
-        if marker != 0xFFC4:
-            print("Error: invalid DHT segment")
-            return
-        length = byteListToInt(segment[2: 4])
-        data = segment[4: length + 2]
-        while len(data) > 0:
-            # get information of Huffman table
-            offset = 0
-            header = data[offset]
-            offset += 1
+        for data in segment:
+            data = data[4:]
+            while len(data) > 0:
+                # get information of Huffman table
+                offset = 0
+                header = data[offset]
+                offset += 1
 
-            # get lengths
-            lengths = data[offset: offset + 16]
-            offset += 16
+                # get lengths
+                lengths = data[offset: offset + 16]
+                offset += 16
 
-            # get elements
-            elements = []
-            for l in lengths:
-                elements += data[offset: offset + l]
-                offset += l
+                # get elements
+                elements = []
+                for l in lengths:
+                    elements += data[offset: offset + l]
+                    offset += l
 
-            hf = HuffmanTable()
-            hf.GetHuffmanBits(lengths, elements)
-            self.huffman_tables[header] = hf
-            data = data[offset:]
+                hf = HuffmanTable()
+                hf.GetHuffmanBits(lengths, elements)
+                self.huffman_tables[header] = hf
+                data = data[offset:]
 
-    def getImageSize(self, segment: list[int]) -> None:
+    def defineQuantizationTables(self, segment: list[list[int]]) -> None:
+        """
+        segment Define Quantization Table structure:
+        -------------------------------------------------------------------
+        Marker Identifier	    2 bytes, 0xff, 0xdb
+        Length                  2 bytes, length of QT
+        QT information          1 byte, QT number
+        Bytes                   n bytes, gives QT values, n = 64*(precision + 1)
+        -------------------------------------------------------------------
+        :param segment:
+        :return:
+        """
+        for data in segment:
+            data = data[4:]
+            while len(data) > 0:
+                header = data[0]
+                self.quantization_tables[header] = data[1: 1 + 64]
+                data = data[65:]
+
+    def baselineDCT(self, segment: list[list[int]]) -> None:
         """
         Start of Frame structure:
         -------------------------------------------------------------------
@@ -259,26 +288,78 @@ class Decoder:
         Length	                2 bytes,
         	                    This value equals to 8 + components*3 value
         Data precision	        1 byte,
-        	                    This is in bits/sample, usually 8
-        	                    (12 and 16 not supported by most software).
+        	                    bits per pixel, usually 0x08
         Image height	        2 bytes, this must be > 0
         Image Width         	2 bytes, this must be > 0
         Number of components	1 byte,
         	                    Usually 1 = grey scaled, 3 = color YcbCr or YIQ
         Each component	        3 bytes,
-        	                    Read each component data of 3 bytes.
-        	                    It contains, (component Id(1byte)(1 = Y, 2 = Cb, 3 = Cr, 4 = I, 5 = Q),
-        	                    sampling factors (1byte) (bit 0-3 vertical., 4-7 horizontal.),
-        	                    quantization table number (1 byte)).
+        	                    component,
+        	                    sampling factor, (bit 0...3, vertical; bit 4...7, horizontal)
+        	                    quantization table number
         -------------------------------------------------------------------
         :param segment: SOF segment
         :return:
         """
-        marker = byteListToInt(segment[0: 2])
-        if marker != 0xFFC0:
-            print("Error: invalid SOF segment")
-        self.height = byteListToInt(segment[5: 7])
-        self.width = byteListToInt(segment[7: 9])
+        for data in segment:
+            (
+                marker,
+                length,
+                precision,
+                self.height,
+                self.width,
+                num_of_component
+            ) = (
+                byteListToInt(data[0: 2]),
+                byteListToInt(data[2: 4]),
+                data[4],
+                byteListToInt(data[5: 7]),
+                byteListToInt(data[7: 9]),
+                data[9]
+            )
+
+            # extract components information
+            components = data[10:]
+            for i in range(num_of_component):
+                # component number
+                component = components[i * 3]
+                # component subsampling factor
+                self.subsample_factor[component] = components[i * 3 + 1]
+                # component quantization mapping
+                self.quantization_mapping[component] = components[i * 3 + 2]
+
+    def starOfScan(self, segment: list[list[int]]) -> None:
+        """
+        Start of Scan structure:
+        -------------------------------------------------------------------
+        Marker Identifier	    2 bytes, 0xff, 0xda
+        Length	                2 bytes, 0x0c
+        	                    This value equals to 6 + components*3
+        Component Number        1 byte
+        Selector                2 bytes for each component,
+                                Huffman table for each component's DC, AC coefficient
+        Spectral select Start   1 byte, 0x00
+        Spectral select End     1 byte, 0x3F
+        Successive approx.	    1 byte, 0x00
+        -------------------------------------------------------------------
+        :param data: data of Start of Scan segment
+        :return:
+        """
+        for data in segment:
+            (
+                marker,
+                length,
+                num_of_component
+            ) = (
+                byteListToInt(data[0: 2]),
+                byteListToInt(data[2: 4]),
+                data[4]
+            )
+            data = data[5:]
+            for i in range(num_of_component):
+                component = data[i * 2]
+                self.huffman_table_mapping[component] = data[i * 2 + 1]
+
 
     def decode(self):
         self.segments = self.separateSegment(self.data)
@@ -292,29 +373,17 @@ class Decoder:
                 self.decodeHuffman(self.segments[marker])
             elif marker == 0xFFC0:
                 # Start of Frame0, Baseline DCT
-                self.getImageSize(self.segments[marker])
-
-
-def sortListOnElemLen(list_of_list: list[list[int]]) -> list[int]:
-    """
-    sort list of list according to their length in descending order
-    :param list_of_list: list to be sorted
-    :return: sorted index
-    """
-    len_dict: dict[int, list[int]] = {}
-    for i in range(len(list_of_list)):
-        elem_len = len(list_of_list[i])
-        if elem_len not in len_dict:
-            len_dict[elem_len] = []
-        len_dict[elem_len].append(i)
-    sorted_indices = []
-    for i in sorted(len_dict, reverse=True):
-        sorted_indices += len_dict[i]
-    return sorted_indices
+                self.baselineDCT(self.segments[marker])
+            elif marker == 0xFFDB:
+                # Define of Quantization Table
+                self.defineQuantizationTables(self.segments[marker])
+            elif marker == 0xFFDA:
+                # Start of Scan
+                self.starOfScan(self.segments[marker])
 
 
 class Crypto:
-    def __init__(self, image: str, key: int):
+    def __init__(self, image: str, key: list[int]):
         """
         set value to initialize
         :param image: file name of image to be encrypted
@@ -324,9 +393,10 @@ class Crypto:
         self.image = image
         self.jpeg_image_decoder = Decoder(image)
         self.jpeg_image_decoder.decode()
+        self.key = key
 
         # set key for RC4 encryption & decryption
-        self.key = key
+        self.rand_bit_generator = rc4.RC4RandBitGenerator(self.key)
 
     def getAmplitudeBitList(self, st: Stream, idx: int) -> tuple[list[list[int]], list[int]]:
         """
@@ -378,10 +448,9 @@ class Crypto:
             bit_list_for_encryption += bits_list[sorted_indices[i]]
 
         # encrypt with pseudo-random bit stream
-        random.seed(self.key)
         encrypted_bit_list = []
         for i in range(len(bit_list_for_encryption)):
-            encrypted_bit_list.append(bit_list_for_encryption[i] ^ random.randint(0, 1))
+            encrypted_bit_list.append(bit_list_for_encryption[i] ^ self.rand_bit_generator.genRandBit())
         return encrypted_bit_list, sorted_indices
 
     def encryptMatrix(self, st: Stream, idx: int):
@@ -402,36 +471,25 @@ class Crypto:
                 st.modifyBit(amplitude_pos_list[i] + j, encrypted_amplitude_bits_list[i][j])
 
     def encryptStartOfScan(self, data: list[int]) -> list[int]:
-        """
-        Start of Scan structure:
-        -------------------------------------------------------------------
-        Marker Identifier	    2 bytes, 0xff, 0xda
-        Length	                2 bytes, 0x0c
-        	                    This value equals to 6 + components*3
-        Components Number       1 byte, 1-4
-        Selector                components*2 bytes, each selector's structure:
-                                ------------------------
-                                selector    DC, AC table
-                                ------------------------
-        Spectral select     	1 byte, 0...63
-        Successive approx.	    1 byte, 00
-        -------------------------------------------------------------------
-        :param data: data of Start of Scan segment
-        :return:
-        """
-        marker = byteListToInt(data[0: 2])
-        if marker != 0xFFDA:
-            print("Error: invalid Start of Scan segment")
-            return None
-
         components = byteListToInt(data[4: 5])
         data_start = 8 + components*2
         st = Stream(data[data_start:])
-        for y in range(self.jpeg_image_decoder.height // 8):
-            for x in range(self.jpeg_image_decoder.width // 8):
-                self.encryptMatrix(st, 0)  # luminance
-                self.encryptMatrix(st, 1)  # chrominance r
-                self.encryptMatrix(st, 1)  # chrominance b
+
+        # num of 8x8 blocks
+        block_num = self.jpeg_image_decoder.height * self.jpeg_image_decoder.width // 64
+        sample_sizes = [
+            (
+                    (self.jpeg_image_decoder.subsample_factor[i] >> 4) *
+                    (self.jpeg_image_decoder.subsample_factor[i] & 0x0F)
+            ) for i in self.jpeg_image_decoder.subsample_factor
+        ]
+        for i in range(block_num // sample_sizes[0]):
+            for j in range(sample_sizes[0]):
+                self.encryptMatrix(st, self.jpeg_image_decoder.huffman_table_mapping[1] & 0x0F)
+            for j in range(sample_sizes[1]):
+                self.encryptMatrix(st, self.jpeg_image_decoder.huffman_table_mapping[2] & 0x0F)
+            for j in range(sample_sizes[2]):
+                self.encryptMatrix(st, self.jpeg_image_decoder.huffman_table_mapping[3] & 0x0F)
 
         # write back encrypted result into data
         for i in range(len(st.data)):
@@ -439,17 +497,32 @@ class Crypto:
         return data
 
     def encryptImage(self):
-        self.encryptStartOfScan(self.jpeg_image_decoder.segments[0xFFDA])
+        for data in self.jpeg_image_decoder.segments[0xFFDA]:
+            self.encryptStartOfScan(data)
 
         # save encrypted image
         image_output = "_" + self.image
         with open(image_output, "wb") as f:
             for marker in self.jpeg_image_decoder.segments:
-                self.jpeg_image_decoder.segments[marker] = (
-                    self.jpeg_image_decoder.segments[marker][0: 2] +
-                    add0xFF00(self.jpeg_image_decoder.segments[marker][2:])
-                )
+                for i in range(len(self.jpeg_image_decoder.segments[marker])):
+                    self.jpeg_image_decoder.segments[marker][i] = (
+                        self.jpeg_image_decoder.segments[marker][i][0: 2] +
+                        add0xFF00(self.jpeg_image_decoder.segments[marker][i][2:])
+                    )
+                for i in range(len(self.jpeg_image_decoder.segments[marker])):
+                    for elem in self.jpeg_image_decoder.segments[marker][i]:
+                        byte = pack("B", elem)
+                        f.write(byte)
 
-                for elem in self.jpeg_image_decoder.segments[marker]:
-                    byte = pack("B", elem)
-                    f.write(byte)
+
+class Compression:
+    def __init__(self, image: str):
+        """
+        :param image: file name of image to be compressed
+        """
+        self.image = image
+        self.jpeg_image_decoder = Decoder(self.image)
+
+"""    def addCompressionTag(self):
+        comment_marker = 0xFFFE
+        if """
