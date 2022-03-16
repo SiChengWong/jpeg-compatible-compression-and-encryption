@@ -1,6 +1,6 @@
 from struct import pack
-import random
 import rc4
+import re
 
 
 def remove0xFF00(l: list[int]) -> list[int]:
@@ -52,6 +52,14 @@ def byteListToInt(l: list[int]) -> int:
     for i in range(len(byte_list)):
         res = (res << 8) + byte_list[i]
     return res
+
+
+def intToByteList(n: int) -> list[int]:
+    byte_list = []
+    while n > 0:
+        byte_list.append(n & 0xFF)
+        n = n >> 8
+    return byte_list
 
 
 def intToBitList(n: int) -> list[int]:
@@ -342,7 +350,7 @@ class Decoder:
         Spectral select End     1 byte, 0x3F
         Successive approx.	    1 byte, 0x00
         -------------------------------------------------------------------
-        :param data: data of Start of Scan segment
+        :param segment: data of Start of Scan segment
         :return:
         """
         for data in segment:
@@ -383,9 +391,10 @@ class Decoder:
 
 
 class Crypto:
-    def __init__(self, image: str, key: list[int]):
+    def __init__(self, image: str, key: list[int], iv: int):
         """
         set value to initialize
+        :param iv: initial vector
         :param image: file name of image to be encrypted
         :param key: secrete key
         """
@@ -393,10 +402,10 @@ class Crypto:
         self.image = image
         self.jpeg_image_decoder = Decoder(image)
         self.jpeg_image_decoder.decode()
-        self.key = key
 
-        # set key for RC4 encryption & decryption
-        self.rand_bit_generator = rc4.RC4RandBitGenerator(self.key)
+        self.key = key
+        # working mode: CRT
+        self.counter = iv
 
     def getAmplitudeBitList(self, st: Stream, idx: int) -> tuple[list[list[int]], list[int]]:
         """
@@ -449,8 +458,14 @@ class Crypto:
 
         # encrypt with pseudo-random bit stream
         encrypted_bit_list = []
+        # set key for RC4 encryption & decryption
+        rand_bit_generator = rc4.RC4RandBitGenerator(
+            [(self.key[i] + self.counter)&0xFF for i in range(len(self.key))]
+        )
+        self.counter += 1
+
         for i in range(len(bit_list_for_encryption)):
-            encrypted_bit_list.append(bit_list_for_encryption[i] ^ self.rand_bit_generator.genRandBit())
+            encrypted_bit_list.append(bit_list_for_encryption[i] ^ rand_bit_generator.genRandBit())
         return encrypted_bit_list, sorted_indices
 
     def encryptMatrix(self, st: Stream, idx: int):
@@ -514,15 +529,3 @@ class Crypto:
                         byte = pack("B", elem)
                         f.write(byte)
 
-
-class Compression:
-    def __init__(self, image: str):
-        """
-        :param image: file name of image to be compressed
-        """
-        self.image = image
-        self.jpeg_image_decoder = Decoder(self.image)
-
-"""    def addCompressionTag(self):
-        comment_marker = 0xFFFE
-        if """
