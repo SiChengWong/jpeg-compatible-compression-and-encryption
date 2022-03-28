@@ -1,6 +1,6 @@
 from struct import pack
 import rc4
-import re
+import math
 
 
 def remove0xFF00(l: list[int]) -> list[int]:
@@ -57,7 +57,7 @@ def byteListToInt(l: list[int]) -> int:
 def intToByteList(n: int) -> list[int]:
     byte_list = []
     while n > 0:
-        byte_list.append(n & 0xFF)
+        byte_list.insert(0, n & 0xFF)
         n = n >> 8
     return byte_list
 
@@ -191,6 +191,7 @@ class Decoder:
         # initialize variables
         self.huffman_tables: dict[int, HuffmanTable] = {}
         self.huffman_table_mapping: dict[int, int] = {}
+        self.huffman_code_dict: dict[int, dict[int, list[int]]] = {}
 
         self.quantization_tables: dict[int, list[int]] = {}
         self.quantization_mapping: dict[int, int] = {}
@@ -221,6 +222,13 @@ class Decoder:
                 segments[marker] = []
             segments[marker].append(remove0xFF00(data[marker_pos[i]: marker_pos[i + 1]]))
         return segments
+
+    def getHuffmanCodeDict(self, root: list, prev_code: list[int], header: int):
+        if isinstance(root, int):
+            self.huffman_code_dict[header][root] = prev_code
+        else:
+            for i in range(len(root)):
+                self.getHuffmanCodeDict(root[i], prev_code + [i], header)
 
     def decodeHuffman(self, segment: list[list[int]]) -> None:
         """
@@ -268,6 +276,15 @@ class Decoder:
                 hf.GetHuffmanBits(lengths, elements)
                 self.huffman_tables[header] = hf
                 data = data[offset:]
+
+        # generate huffman code table
+        for header in self.huffman_tables:
+            self.huffman_code_dict[header] = {}
+            self.getHuffmanCodeDict(
+                self.huffman_tables[header].root,
+                [],
+                header
+            )
 
     def defineQuantizationTables(self, segment: list[list[int]]) -> None:
         """
@@ -433,6 +450,9 @@ class Crypto:
             if symbol1 > 15:
                 l += symbol1 >> 4
             size = symbol1 & 0x0F
+            if size == 0:
+                l += 1
+                continue
             pos_list.append(st.pos)
             amplitude_bits_list.append(paddingToLen(intToBitList(st.GetBitN(size)), size))
             if l < 64:
@@ -529,3 +549,204 @@ class Crypto:
                         byte = pack("B", elem)
                         f.write(byte)
 
+
+class Compression:
+    def __init__(self, image: str, compression_level: int = 1):
+        """
+        :param image: file name of image to be compressed
+        :param compression_level: how many bits will be discarded
+        """
+        self.image = image
+        self.jpeg_image_decoder = Decoder(self.image)
+        self.jpeg_image_decoder.decode()
+
+        self.compression_level = compression_level
+
+    def addCompressionTag(self):
+        """
+        comment segment structure:
+        -------------------------------------------------------------------
+        Marker Identifier	    2 bytes, 0xff, 0xfe
+        Length                  2 bytes
+        Content                 1 byte, image compressed time(s)
+        -------------------------------------------------------------------
+        :return:
+        """
+        marker = 0xFFFE
+        length = 0x03
+        if marker not in self.jpeg_image_decoder.segments:
+            self.jpeg_image_decoder.segments[marker] = [
+                    intToByteList(marker) +
+                    paddingToLen(intToByteList(length), 2) +
+                    [0]
+                ]
+        # compression time plus compression ratio
+        self.jpeg_image_decoder.segments[marker][0][4] += self.compression_level
+
+    def modifyQuantTable(self) -> None:
+        marker = 0xFFDB
+        # modify quant table segment
+        # each element in quantization table doubles self.compression_ratio times
+        for k in range(len(self.jpeg_image_decoder.segments[marker])):
+            offset = 4
+            while offset < len(self.jpeg_image_decoder.segments[marker][k]):
+                offset += 1
+                for i in range(64):
+                    self.jpeg_image_decoder.segments[marker][k][offset + i] = min(
+                        (self.jpeg_image_decoder.segments[marker][k][offset + i] << self.compression_level), 0xFF
+                    )
+                offset += 64
+        # modify self.quant
+        for header in self.jpeg_image_decoder.quantization_tables:
+            for i in range(len(self.jpeg_image_decoder.quantization_tables[header])):
+                self.jpeg_image_decoder.quantization_tables[header][i] = min(
+                    (self.jpeg_image_decoder.quantization_tables[header][i] << self.compression_level), 0xFF
+                )
+
+    def getAmplitudeBitList(self, st: Stream, idx: int) -> list[list]:
+        # decode a matrix
+        amplitude_bits = [[] for i in range(64)]
+        # DC coefficient
+        size = self.jpeg_image_decoder.huffman_tables[0 + idx].GetCode(st)
+        amplitude_bits[0] = paddingToLen(intToBitList(st.GetBitN(size)), size)
+        # AC coefficients
+        l = 1
+        while l < 64:
+            symbol_1 = self.jpeg_image_decoder.huffman_tables[16 + idx].GetCode(st)
+            if symbol_1 == 0:
+                # End of Block
+                break
+
+            if symbol_1 > 15:
+                l += symbol_1 >> 4
+            size = symbol_1 & 0x0F
+            amplitude_bits[l] = paddingToLen(intToBitList(st.GetBitN(size)), size)
+            if l < 64:
+                l += 1
+        return amplitude_bits
+
+    def compressCoefficientBits(self, amplitude_bits: list[list]) -> list[list[int]]:
+        # compress the matrix
+        for i in range(len(amplitude_bits)):
+            amplitude_bits[i] = amplitude_bits[i][0: max(len(amplitude_bits[i]) - self.compression_level, 0)]
+        return amplitude_bits
+
+    def encodeCoefficientBits(self, idx: int, amplitude_bits: list[list[int]]):
+        # encode the matrix
+        coded_bit_list: list[int] = []
+        # DC coefficient
+        size = len(amplitude_bits[0])
+        coded_bit_list += self.jpeg_image_decoder.huffman_code_dict[0 + idx][size]
+        coded_bit_list += amplitude_bits[0]
+        # AC coefficient
+        l = 1
+        run_length = 0
+        while l < 64:
+            if not amplitude_bits[l]:
+                # get run-length
+                k = l + 1
+                while k < 64:
+                    if amplitude_bits[k]:
+                        break
+                    k += 1
+
+                if k == 64:
+                    # End of Block
+                    coded_bit_list += self.jpeg_image_decoder.huffman_code_dict[16 + idx][0]
+                    break
+                else:
+                    run_length = k - l
+                    while run_length > 0x0F:
+                        # 16 continuous zeros
+                        coded_bit_list += self.jpeg_image_decoder.huffman_code_dict[16 + idx][0xF0]
+                        run_length -= 16
+                l = k
+            else:
+                # non-zero AC coefficient
+
+                # code symbol-1
+                symbol_1 = (run_length << 4) + len(amplitude_bits[l])
+                coded_bit_list += self.jpeg_image_decoder.huffman_code_dict[16 + idx][symbol_1]
+                # code amplitude
+                coded_bit_list += amplitude_bits[l]
+
+                # reset run-length
+                run_length = 0
+                if l < 64:
+                    l += 1
+        return coded_bit_list
+
+    def compressMatrix(self, st: Stream, idx: int) -> list[int]:
+        amplitude_bits = self.getAmplitudeBitList(st, idx)
+        compressed_amplitude_bits = self.compressCoefficientBits(amplitude_bits)
+        coded_compressed_bit_list = self.encodeCoefficientBits(idx, compressed_amplitude_bits)
+        return coded_compressed_bit_list
+
+    def compressStartOfScan(self):
+        marker = 0xFFDA
+        for k in range(len(self.jpeg_image_decoder.segments[marker])):
+            data = self.jpeg_image_decoder.segments[marker][k]
+            components = byteListToInt(data[4: 5])
+            data_start = 8 + components*2
+            st = Stream(data[data_start:])
+            # num of 8x8 blocks
+            sample_sizes = [
+                (
+                        (
+                            self.jpeg_image_decoder.subsample_factor[i] >> 4,
+                            self.jpeg_image_decoder.subsample_factor[i] & 0x0F
+                        )
+                ) for i in self.jpeg_image_decoder.subsample_factor
+            ]
+            mcu_num = (
+                    math.ceil(
+                        self.jpeg_image_decoder.height / (8 * sample_sizes[0][0])
+                    ) *
+                    math.ceil(
+                        self.jpeg_image_decoder.width / (8 * sample_sizes[0][1])
+                    )
+            )
+
+            # compress each block
+            compressed_bit_list = []
+            for i in range(mcu_num):
+                for j in range(sample_sizes[0][0] * sample_sizes[0][1]):
+                    compressed_bit_list += self.compressMatrix(
+                        st, self.jpeg_image_decoder.huffman_table_mapping[1] & 0x0F
+                    )
+                for j in range(sample_sizes[1][0] * sample_sizes[1][1]):
+                    compressed_bit_list += self.compressMatrix(
+                        st, self.jpeg_image_decoder.huffman_table_mapping[2] & 0x0F
+                    )
+                for j in range(sample_sizes[2][0] * sample_sizes[2][1]):
+                    compressed_bit_list += self.compressMatrix(
+                        st, self.jpeg_image_decoder.huffman_table_mapping[3] & 0x0F
+                    )
+
+            # write back compressed data
+            compressed_bytes = []
+            while len(compressed_bit_list) % 8 != 0:
+                compressed_bit_list.append(0)
+            for i in range(len(compressed_bit_list) // 8):
+                compressed_bytes.append(bitListToInt(compressed_bit_list[i * 8: i * 8 + 8]))
+
+            self.jpeg_image_decoder.segments[marker][k] = data[0: data_start] + compressed_bytes
+
+    def compressImage(self):
+        self.modifyQuantTable()
+        self.compressStartOfScan()
+        self.addCompressionTag()
+
+        # save the compressed image
+        image_output = "-" + self.image
+        with open(image_output, "wb") as f:
+            for marker in self.jpeg_image_decoder.segments:
+                for i in range(len(self.jpeg_image_decoder.segments[marker])):
+                    self.jpeg_image_decoder.segments[marker][i] = (
+                        self.jpeg_image_decoder.segments[marker][i][0: 2] +
+                        add0xFF00(self.jpeg_image_decoder.segments[marker][i][2:])
+                    )
+                for i in range(len(self.jpeg_image_decoder.segments[marker])):
+                    for elem in self.jpeg_image_decoder.segments[marker][i]:
+                        byte = pack("B", elem)
+                        f.write(byte)
