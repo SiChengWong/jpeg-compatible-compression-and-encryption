@@ -424,6 +424,14 @@ class Crypto:
         # working mode: CRT
         self.counter = iv
 
+        # compression tag
+        self.compression_level = 0
+
+    def getCompressionTag(self):
+        marker = 0xFFFE
+        if marker in self.jpeg_image_decoder.segments:
+            self.compression_level = self.jpeg_image_decoder.segments[marker][0][4]
+
     def getAmplitudeBitList(self, st: Stream, idx: int) -> tuple[list[list[int]], list[int]]:
         """
         extract bits list of coefficients from stream
@@ -471,21 +479,27 @@ class Crypto:
         sorted_indices = [sorted_indices[i] + 1 for i in range(len(sorted_indices))]
         sorted_indices.insert(0, 0)
 
-        # bit list for encryption
-        bit_list_for_encryption: list[int] = []
+        # bits list for encryption
+        sorted_bits_list: list[list[int]] = []
         for i in range(len(sorted_indices)):
-            bit_list_for_encryption += bits_list[sorted_indices[i]]
+            sorted_bits_list.append(bits_list[sorted_indices[i]])
 
         # encrypt with pseudo-random bit stream
         encrypted_bit_list = []
         # set key for RC4 encryption & decryption
         rand_bit_generator = rc4.RC4RandBitGenerator(
-            [(self.key[i] + self.counter)&0xFF for i in range(len(self.key))]
+            [(self.key[i] + self.counter) & 0xFF for i in range(len(self.key))]
         )
         self.counter += 1
 
-        for i in range(len(bit_list_for_encryption)):
-            encrypted_bit_list.append(bit_list_for_encryption[i] ^ rand_bit_generator.genRandBit())
+        encrypted_bit_list = []
+        for i in range(len(sorted_bits_list)):
+            for j in range(len(sorted_bits_list[i])):
+                sorted_bits_list[i][j] = sorted_bits_list[i][j] ^ rand_bit_generator.genRandBit()
+            for j in range(self.compression_level):
+                rand_bit_generator.genRandBit()
+            encrypted_bit_list += sorted_bits_list[i]
+
         return encrypted_bit_list, sorted_indices
 
     def encryptMatrix(self, st: Stream, idx: int):
@@ -532,6 +546,7 @@ class Crypto:
         return data
 
     def encryptImage(self):
+        self.getCompressionTag()
         for data in self.jpeg_image_decoder.segments[0xFFDA]:
             self.encryptStartOfScan(data)
 
