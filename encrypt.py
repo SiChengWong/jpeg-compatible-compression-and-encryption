@@ -525,19 +525,33 @@ class Crypto:
         st = Stream(data[data_start:])
 
         # num of 8x8 blocks
-        block_num = self.jpeg_image_decoder.height * self.jpeg_image_decoder.width // 64
         sample_sizes = [
             (
-                    (self.jpeg_image_decoder.subsample_factor[i] >> 4) *
-                    (self.jpeg_image_decoder.subsample_factor[i] & 0x0F)
+                (
+                    self.jpeg_image_decoder.subsample_factor[i] >> 4,
+                    self.jpeg_image_decoder.subsample_factor[i] & 0x0F,
+                    (
+                            (self.jpeg_image_decoder.subsample_factor[i] >> 4)
+                            * (self.jpeg_image_decoder.subsample_factor[i] & 0x0F)
+                    )
+
+                )
             ) for i in self.jpeg_image_decoder.subsample_factor
         ]
-        for i in range(block_num // sample_sizes[0]):
-            for j in range(sample_sizes[0]):
+        mcu_num = (
+                math.ceil(
+                    self.jpeg_image_decoder.height / (8 * sample_sizes[0][0])
+                ) *
+                math.ceil(
+                    self.jpeg_image_decoder.width / (8 * sample_sizes[0][1])
+                )
+        )
+        for i in range(mcu_num):
+            for j in range(sample_sizes[0][2]):
                 self.encryptMatrix(st, self.jpeg_image_decoder.huffman_table_mapping[1] & 0x0F)
-            for j in range(sample_sizes[1]):
+            for j in range(sample_sizes[1][2]):
                 self.encryptMatrix(st, self.jpeg_image_decoder.huffman_table_mapping[2] & 0x0F)
-            for j in range(sample_sizes[2]):
+            for j in range(sample_sizes[2][2]):
                 self.encryptMatrix(st, self.jpeg_image_decoder.huffman_table_mapping[3] & 0x0F)
 
         # write back encrypted result into data
@@ -709,7 +723,12 @@ class Compression:
                 (
                         (
                             self.jpeg_image_decoder.subsample_factor[i] >> 4,
-                            self.jpeg_image_decoder.subsample_factor[i] & 0x0F
+                            self.jpeg_image_decoder.subsample_factor[i] & 0x0F,
+                            (
+                                    (self.jpeg_image_decoder.subsample_factor[i] >> 4)
+                                    * (self.jpeg_image_decoder.subsample_factor[i] & 0x0F)
+                            )
+
                         )
                 ) for i in self.jpeg_image_decoder.subsample_factor
             ]
@@ -725,15 +744,15 @@ class Compression:
             # compress each block
             compressed_bit_list = []
             for i in range(mcu_num):
-                for j in range(sample_sizes[0][0] * sample_sizes[0][1]):
+                for j in range(sample_sizes[0][2]):
                     compressed_bit_list += self.compressMatrix(
                         st, self.jpeg_image_decoder.huffman_table_mapping[1] & 0x0F
                     )
-                for j in range(sample_sizes[1][0] * sample_sizes[1][1]):
+                for j in range(sample_sizes[1][2]):
                     compressed_bit_list += self.compressMatrix(
                         st, self.jpeg_image_decoder.huffman_table_mapping[2] & 0x0F
                     )
-                for j in range(sample_sizes[2][0] * sample_sizes[2][1]):
+                for j in range(sample_sizes[2][2]):
                     compressed_bit_list += self.compressMatrix(
                         st, self.jpeg_image_decoder.huffman_table_mapping[3] & 0x0F
                     )
