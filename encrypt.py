@@ -559,13 +559,14 @@ class Crypto:
             data[i + data_start] = st.data[i]
         return data
 
-    def encryptImage(self):
+    def encryptImage(self, image_output = None):
         self.getCompressionTag()
         for data in self.jpeg_image_decoder.segments[0xFFDA]:
             self.encryptStartOfScan(data)
 
         # save encrypted image
-        image_output = "_" + self.image
+        if image_output is None:
+            image_output = "_" + self.image
         with open(image_output, "wb") as f:
             for marker in self.jpeg_image_decoder.segments:
                 for i in range(len(self.jpeg_image_decoder.segments[marker])):
@@ -766,13 +767,14 @@ class Compression:
 
             self.jpeg_image_decoder.segments[marker][k] = data[0: data_start] + compressed_bytes
 
-    def compressImage(self):
+    def compressImage(self, image_output = None):
         self.modifyQuantTable()
         self.compressStartOfScan()
         self.addCompressionTag()
 
         # save the compressed image
-        image_output = "-" + self.image
+        if image_output is None:
+            image_output = "-" + self.image
         with open(image_output, "wb") as f:
             for marker in self.jpeg_image_decoder.segments:
                 for i in range(len(self.jpeg_image_decoder.segments[marker])):

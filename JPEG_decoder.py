@@ -41,7 +41,8 @@ def ColorConversion(Y, Cr, Cb):
     R = Cr * (2 - 2 * 0.299) + Y
     B = Cb * (2 - 2 * 0.114) + Y
     G = (Y - 0.114 * B - 0.299 * R) / 0.587
-    return (Clamp(R + 128), Clamp(G + 128), Clamp(B + 128))
+    return int(R + 128), int(G + 128), int(B + 128)
+    # return (Clamp(R + 128), Clamp(G + 128), Clamp(B + 128))
 
 
 def RemoveFF00(data):
@@ -395,12 +396,17 @@ class JPEG:
         with Image.new("RGB", (self.width, self.height), (0,0,0)) as im:
             for y in range(im.height):
                 for x in range(im.width):
-                    im.putpixel(
-                        (x, y),
-                        ColorConversion(
+                    pixel_in_RGB = ColorConversion(
                             int(self.getPixel(x, y, 0)),
                             int(self.getPixel(x, y, 2)),
                             int(self.getPixel(x, y, 1))
+                        )
+                    im.putpixel(
+                        (x, y),
+                        (
+                            pixel_in_RGB[0] & 0xFF,
+                            pixel_in_RGB[1] & 0xFF,
+                            pixel_in_RGB[2] & 0xFF
                         )
                     )
             im.show("{}.jpg".format(image_name))
@@ -450,8 +456,8 @@ class JPEG:
 
 
 if __name__ == "__main__":
-    name = "1"
+    name = "_1"
     img = JPEG("{}.jpg".format(name))
     img.decode()
-    # img.displayImage(name)
-    img.savePixels("{}.txt".format(name))
+    img.displayImage(name)
+    #img.savePixels("{}.txt".format(name))
