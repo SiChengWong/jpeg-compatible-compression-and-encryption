@@ -78,7 +78,7 @@ class RC4:
         return M
 
 
-def intToBitList(n: int) -> list[int]:
+def intToBitList(n):
     bit_list = []
     while n > 0:
         bit_list.insert(0, n & 1)
@@ -86,7 +86,7 @@ def intToBitList(n: int) -> list[int]:
     return bit_list
 
 
-def paddingToLen(l: list[int], length: int, pos: int = 0):
+def paddingToLen(l, length, pos=0):
     while len(l) < length:
         l.insert(pos, 0)
     return l
@@ -105,7 +105,7 @@ class RC4RandBitGenerator:
         array[i] = array[j]
         array[j] = temp
 
-    def initialize(self, key: list[int]):
+    def initialize(self, key):
         self.S = self.T = []
         for i in range(256):
             self.S.append(i)
@@ -115,7 +115,7 @@ class RC4RandBitGenerator:
             j = (j + self.S[i] + self.T[i]) % 256
             self.swap(self.S, i, j)
 
-    def __init__(self, key: list[int]):
+    def __init__(self, key):
         self.key = [key[i] & 0xFF for i in range(len(key))]
         self.initialize(self.key)
 

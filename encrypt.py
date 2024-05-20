@@ -3,7 +3,7 @@ import rc4
 import math
 
 
-def remove0xFF00(l: list[int]) -> list[int]:
+def remove0xFF00(l):
     """
     Removes 0x00 after 0xff in the image scan section of JPEG
     :param l: list to be removed 0xFF00
@@ -19,7 +19,7 @@ def remove0xFF00(l: list[int]) -> list[int]:
     return l_without_0xFF00
 
 
-def add0xFF00(l: list[int]) -> list[int]:
+def add0xFF00(l):
     l_added_0xFF00 = []
     for i in range(len(l)):
         l_added_0xFF00.append(l[i])
@@ -28,7 +28,7 @@ def add0xFF00(l: list[int]) -> list[int]:
     return l_added_0xFF00
 
 
-def removeMarker(l: list[int], marker: int) -> list[int]:
+def removeMarker(l, marker):
     l_without_marker = []
     marker_len = len(intToBitList(marker)) >> 3
     i = 0
@@ -41,7 +41,7 @@ def removeMarker(l: list[int], marker: int) -> list[int]:
     return l_without_marker
 
 
-def byteListToInt(l: list[int]) -> int:
+def byteListToInt(l):
     """
     convert list of integer ranging from 0 to 255 into integer
     :param l: list
@@ -54,7 +54,7 @@ def byteListToInt(l: list[int]) -> int:
     return res
 
 
-def intToByteList(n: int) -> list[int]:
+def intToByteList(n: int):
     byte_list = []
     while n > 0:
         byte_list.insert(0, n & 0xFF)
@@ -62,7 +62,7 @@ def intToByteList(n: int) -> list[int]:
     return byte_list
 
 
-def intToBitList(n: int) -> list[int]:
+def intToBitList(n: int):
     bit_list = []
     while n > 0:
         bit_list.insert(0, n & 1)
@@ -70,20 +70,20 @@ def intToBitList(n: int) -> list[int]:
     return bit_list
 
 
-def bitListToInt(bit_list: list[int]) -> int:
+def bitListToInt(bit_list):
     n = 0
     for b in bit_list:
         n = (n << 1) + b
     return n
 
 
-def paddingToLen(l: list[int], length: int, pos: int = 0):
+def paddingToLen(l, length, pos=0):
     while len(l) < length:
         l.insert(pos, 0)
     return l
 
 
-def sortListOnElemLen(list_of_list: list[list[int]]) -> list[int]:
+def sortListOnElemLen(list_of_list):
     """
     sort list of list according to their length in descending order
     :param list_of_list: list to be sorted
@@ -179,7 +179,7 @@ class Stream:
 
 
 class Decoder:
-    def __init__(self, image: str):
+    def __init__(self, image):
         """
         open a JPEG image
         :param image: file name of image to be encrypted
@@ -189,21 +189,21 @@ class Decoder:
             self.data = list(f.read())
 
         # initialize variables
-        self.huffman_tables: dict[int, HuffmanTable] = {}
-        self.huffman_table_mapping: dict[int, int] = {}
-        self.huffman_code_dict: dict[int, dict[int, list[int]]] = {}
+        self.huffman_tables = {}
+        self.huffman_table_mapping = {}
+        self.huffman_code_dict = {}
 
-        self.quantization_tables: dict[int, list[int]] = {}
-        self.quantization_mapping: dict[int, int] = {}
+        self.quantization_tables = {}
+        self.quantization_mapping = {}
 
-        self.subsample_factor: dict[int, int] = {}
+        self.subsample_factor = {}
 
         self.height = 0
         self.width = 0
 
-        self.segments: dict[int, list[list[int]]] = {}
+        self.segments = {}
 
-    def separateSegment(self, data: list[int]) -> dict[int, list[list[int]]]:
+    def separateSegment(self, data):
         """
         separate segments according to markers starting with 0xFF
         """
@@ -223,14 +223,14 @@ class Decoder:
             segments[marker].append(remove0xFF00(data[marker_pos[i]: marker_pos[i + 1]]))
         return segments
 
-    def getHuffmanCodeDict(self, root: list, prev_code: list[int], header: int):
+    def getHuffmanCodeDict(self, root, prev_code, header):
         if isinstance(root, int):
             self.huffman_code_dict[header][root] = prev_code
         else:
             for i in range(len(root)):
                 self.getHuffmanCodeDict(root[i], prev_code + [i], header)
 
-    def decodeHuffman(self, segment: list[list[int]]) -> None:
+    def decodeHuffman(self, segment):
         """
         segment DHT(Define of Huffman Table) structure:
         -------------------------------------------------------------------
@@ -286,7 +286,7 @@ class Decoder:
                 header
             )
 
-    def defineQuantizationTables(self, segment: list[list[int]]) -> None:
+    def defineQuantizationTables(self, segment) -> None:
         """
         segment Define Quantization Table structure:
         -------------------------------------------------------------------
@@ -305,7 +305,7 @@ class Decoder:
                 self.quantization_tables[header] = data[1: 1 + 64]
                 data = data[65:]
 
-    def baselineDCT(self, segment: list[list[int]]) -> None:
+    def baselineDCT(self, segment) -> None:
         """
         Start of Frame structure:
         -------------------------------------------------------------------
@@ -353,7 +353,7 @@ class Decoder:
                 # component quantization mapping
                 self.quantization_mapping[component] = components[i * 3 + 2]
 
-    def starOfScan(self, segment: list[list[int]]) -> None:
+    def starOfScan(self, segment) -> None:
         """
         Start of Scan structure:
         -------------------------------------------------------------------
@@ -408,7 +408,7 @@ class Decoder:
 
 
 class Crypto:
-    def __init__(self, image: str, key: list[int], iv: int):
+    def __init__(self, image, key, iv):
         """
         set value to initialize
         :param iv: initial vector
@@ -432,21 +432,21 @@ class Crypto:
         if marker in self.jpeg_image_decoder.segments:
             self.compression_level = self.jpeg_image_decoder.segments[marker][0][4]
 
-    def getAmplitudeBitList(self, st: Stream, idx: int) -> tuple[list[list[int]], list[int]]:
+    def getAmplitudeBitList(self, st, idx):
         """
         extract bits list of coefficients from stream
         :param st: bit stream
         :param idx: Huffman table index
         :return: list of bits
         """
-        pos_list: list[int] = []
+        pos_list = []
         # DC coefficient
         # size of coded amplitude in bits
         size = self.jpeg_image_decoder.huffman_tables[0 + idx].GetCode(st)
         pos_list.append(st.pos)
 
         # list of coded amplitude
-        amplitude_bits_list: list[list[int]] = [paddingToLen(intToBitList(st.GetBitN(size)), size)]
+        amplitude_bits_list = [paddingToLen(intToBitList(st.GetBitN(size)), size)]
 
         l = 1
         while l < 64:
@@ -467,7 +467,7 @@ class Crypto:
                 l += 1
         return amplitude_bits_list, pos_list
 
-    def encryptCoefficientBitList(self, bits_list: list[list[int]]) -> tuple[list[int], list[int]]:
+    def encryptCoefficientBitList(self, bits_list):
         """
         encrypt bit list denoting coded DCT coefficients
         :param bits_list: coded DCT coefficients
@@ -480,7 +480,7 @@ class Crypto:
         sorted_indices.insert(0, 0)
 
         # bits list for encryption
-        sorted_bits_list: list[list[int]] = []
+        sorted_bits_list = []
         for i in range(len(sorted_indices)):
             sorted_bits_list.append(bits_list[sorted_indices[i]])
 
@@ -519,7 +519,7 @@ class Crypto:
             for j in range(len(encrypted_amplitude_bits_list[i])):
                 st.modifyBit(amplitude_pos_list[i] + j, encrypted_amplitude_bits_list[i][j])
 
-    def encryptStartOfScan(self, data: list[int]) -> list[int]:
+    def encryptStartOfScan(self, data):
         components = byteListToInt(data[4: 5])
         data_start = 8 + components*2
         st = Stream(data[data_start:])
@@ -633,7 +633,7 @@ class Compression:
                     (self.jpeg_image_decoder.quantization_tables[header][i] << self.compression_level), 0xFF
                 )
 
-    def getAmplitudeBitList(self, st: Stream, idx: int) -> list[list]:
+    def getAmplitudeBitList(self, st, idx):
         # decode a matrix
         amplitude_bits = [[] for i in range(64)]
         # DC coefficient
@@ -655,13 +655,13 @@ class Compression:
                 l += 1
         return amplitude_bits
 
-    def compressCoefficientBits(self, amplitude_bits: list[list]) -> list[list[int]]:
+    def compressCoefficientBits(self, amplitude_bits):
         # compress the matrix
         for i in range(len(amplitude_bits)):
             amplitude_bits[i] = amplitude_bits[i][0: max(len(amplitude_bits[i]) - self.compression_level, 0)]
         return amplitude_bits
 
-    def encodeCoefficientBits(self, idx: int, amplitude_bits: list[list[int]]):
+    def encodeCoefficientBits(self, idx, amplitude_bits):
         # encode the matrix
         coded_bit_list: list[int] = []
         # DC coefficient
@@ -706,7 +706,7 @@ class Compression:
                     l += 1
         return coded_bit_list
 
-    def compressMatrix(self, st: Stream, idx: int) -> list[int]:
+    def compressMatrix(self, st, idx):
         amplitude_bits = self.getAmplitudeBitList(st, idx)
         compressed_amplitude_bits = self.compressCoefficientBits(amplitude_bits)
         coded_compressed_bit_list = self.encodeCoefficientBits(idx, compressed_amplitude_bits)
@@ -786,3 +786,16 @@ class Compression:
                     for elem in self.jpeg_image_decoder.segments[marker][i]:
                         byte = pack("B", elem)
                         f.write(byte)
+
+if __name__ == "__main__":
+    filename = 'img/ustc-banner.jpg'
+    key = [1,9,5,8,0,9,2,0]
+    iv = 2022
+    
+    encryption = Crypto(filename,key,iv)
+    filename_encrypted = 'img/ustc-banner-encrypted.jpg'
+    encryption.encryptImage(filename_encrypted)
+
+    decryption = Crypto(filename_encrypted,key,iv)
+    filename_decrypted = 'img/ustc-banner-decrypted.jpg'
+    decryption.encryptImage(filename_decrypted)

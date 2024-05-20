@@ -216,16 +216,16 @@ class JPEG:
     def __init__(self, image_file):
         # vertical and horizontal subsample factor for each component
 
-        self.samp_factor: list[list[int]] = []
+        self.samp_factor = []
         # vertical and horizontal subsample interval for each component
-        self.samp_interval: list[list[int]] = []
+        self.samp_interval = []
         # vertical and horizontal size for each component
-        self.size: list[list[int]] = []
+        self.size = []
 
         # block dict for each component
-        self.block: list[dict[tuple[int, int], list[list[int]]]] = [{}, {}, {}]
+        self.block = [{}, {}, {}]
         # image pixels
-        self.pixel: dict[tuple[int, int], tuple[int, int, int]] = {}
+        self.pixel = {}
 
         self.huffman_tables = {}
         self.quant = {}
@@ -271,7 +271,7 @@ class JPEG:
 
         return i.base, dccoeff
 
-    def next(self, x: int, y: int, component: int) -> tuple[int, int, int]:
+    def next(self, x, y, component):
         """
         :param x: horizontal coordinate of a block
         :param y: vertical coordinate of a block
@@ -314,7 +314,7 @@ class JPEG:
         st = Stream(data)
 
         # block descriptor: (x, y, component)
-        block_descriptor: tuple[int, int, int] = (0, 0, 0)
+        block_descriptor = (0, 0, 0)
         prev_DC_coefficient = [0,0,0]
         
         while block_descriptor is not None:
@@ -381,7 +381,7 @@ class JPEG:
             self.huffman_tables[header] = hf
             data = data[offset:]
 
-    def getPixel(self, x: int, y: int, component: int) -> int:
+    def getPixel(self, x, y, component):
         block_coordinate = (
             x // (8 * self.samp_interval[component][1]),
             y // (8 * self.samp_interval[component][0])
@@ -392,7 +392,7 @@ class JPEG:
             x % (8 * self.samp_interval[component][1])//self.samp_interval[component][1]
         ]
 
-    def displayImage(self, image_name: str):
+    def displayImage(self, image_name):
         with Image.new("RGB", (self.width, self.height), (0,0,0)) as im:
             for y in range(im.height):
                 for x in range(im.width):
@@ -412,7 +412,7 @@ class JPEG:
             im.show("{}.jpg".format(image_name))
             im.save("{}.bmp".format(image_name))
 
-    def savePixels(self, file_out: str):
+    def savePixels(self, file_out):
         # color space conversion
         for y in range(self.height):
             for x in range(self.width):
@@ -456,8 +456,8 @@ class JPEG:
 
 
 if __name__ == "__main__":
-    name = "_1"
-    img = JPEG("{}.jpg".format(name))
+    name = "img/ustc-banner.jpg"
+    img = JPEG(name)
     img.decode()
     img.displayImage(name)
     #img.savePixels("{}.txt".format(name))
