@@ -796,6 +796,10 @@ if __name__ == "__main__":
     filename_encrypted = 'img/ustc-banner-encrypted.jpg'
     encryption.encryptImage(filename_encrypted)
 
-    decryption = Crypto(filename_encrypted,key,iv)
+    compression = Compression(filename_encrypted,1)
+    filename_compressed = 'img/ustc-banner-encrypted-compressed.jpg'
+    compression.compressImage(filename_compressed)
+
+    decryption = Crypto(filename_compressed,key,iv)
     filename_decrypted = 'img/ustc-banner-decrypted.jpg'
     decryption.encryptImage(filename_decrypted)
